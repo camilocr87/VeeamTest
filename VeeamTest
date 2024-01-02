@@ -1,0 +1,96 @@
+using System;
+using System.IO;
+using System.Threading.Tasks;
+
+namespace FolderSync
+{
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            if (args.Length != 4)
+            {
+                Console.WriteLine("Uso: FolderSync <ruta-carpeta-origen> <ruta-carpeta-replica> <intervalo-sincronizacion> <ruta-archivo-registro>");
+                return;
+            }
+
+            string rutaCarpetaOrigen = args[0];
+            string rutaCarpetaReplica = args[1];
+            int intervaloSincronizacion = int.Parse(args[2]);
+            string rutaArchivoRegistro = args[3];
+
+            // Inicializamos los objetos necesarios
+            DirectoryInfo carpetaOrigen = new DirectoryInfo(rutaCarpetaOrigen);
+            DirectoryInfo carpetaReplica = new DirectoryInfo(rutaCarpetaReplica);
+            FileSystemWatcher watcher = new FileSystemWatcher(carpetaOrigen.FullName);
+            StreamWriter escritorRegistro = new StreamWriter(rutaArchivoRegistro);
+
+            // Creamos un hash MD5 de cada archivo en la carpeta de origen
+            Dictionary<string, string> hashArchivosOrigen = new Dictionary<string, string>();
+            foreach (FileInfo archivo in carpetaOrigen.GetFiles())
+            {
+                hashArchivosOrigen[archivo.FullName] = archivo.GetMD5();
+            }
+
+            // Iniciamos el bucle de sincronización
+            while (true)
+            {
+                // Obtenemos una lista de los archivos nuevos/modificados/eliminados en la carpeta de origen
+                List<FileInfo> archivosActualizados = ObtieneArchivosActualizados(carpetaOrigen, hashArchivosOrigen);
+
+                // Actualizamos la carpeta de réplica con los archivos nuevos/modificados
+                ActualizaCarpetaReplica(carpetaReplica, archivosActualizados);
+
+                // Registramos las operaciones de sincronización
+                for (int i = 0; i < archivosActualizados.Count; i++)
+                {
+                    string accion = archivosActualizados[i].Exists ? "creación" : "eliminación";
+                    escritorRegistro.WriteLine("{0}: {1}", accion, archivosActualizados[i].FullName);
+                }
+
+                // Esperamos hasta el siguiente intervalo de sincronización
+                Thread.Sleep(intervaloSincronizacion * 1000);
+            }
+        }
+
+        private static List<FileInfo> ObtieneArchivosActualizados(DirectoryInfo carpeta, Dictionary<string, string> hashArchivosOrigen)
+        {
+            List<FileInfo> archivosActualizados = new List<FileInfo>();
+
+            foreach (FileInfo archivo in carpeta.GetFiles())
+            {
+                string hashActual = archivo.GetMD5();
+
+                // Si el archivo no existe en la carpeta de origen, lo creamos
+                if (!hashArchivosOrigen.ContainsKey(archivo.FullName))
+                {
+                    archivosActualizados.Add(archivo);
+                }
+                else if (hashActual != hashArchivosOrigen[archivo.FullName])
+                {
+                    // Si el archivo existe en la carpeta de origen pero ha sido modificado, lo actualizamos
+                    archivosActualizados.Add(archivo);
+                }
+            }
+
+            return archivosActualizados;
+        }
+
+        private static void ActualizaCarpetaReplica(DirectoryInfo carpetaReplica, List<FileInfo> archivosActualizados)
+        {
+            foreach (FileInfo archivo in archivosActualizados)
+            {
+                if (archivo.Exists)
+                {
+                    // Copiamos el archivo de la carpeta de origen a la carpeta de réplica
+                    File.Copy(archivo.FullName, Path.Combine(carpetaReplica.FullName, archivo.Name), true);
+                }
+                else
+                {
+                    // Creamos el archivo en la carpeta de réplica
+                    File.Create(Path.Combine(carpetaReplica.FullName, archivo.Name));
+                }
+            }
+        }
+    }
+}
